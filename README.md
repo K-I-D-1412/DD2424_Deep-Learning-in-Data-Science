@@ -1,3 +1,83 @@
+# DD2424 Deep Learning in Data Science
+
 > **Note**: This project was developed as part of the *Deep Learning in Data Science* course (DD2424) at KTH Royal Institute of Technology.
 > 
 > **Code of Honour**: If there are similar questions or labs or projects in the future, it is the responsibility of KTH students not to copy or modify these codes, or other files because it is against the [KTH EECS Code of Honour](https://www.kth.se/en/eecs/utbildning/hederskodex). The owner of this repository doesn't take any commitment for other's faults.
+
+## 📌 Project Overview
+This repository contains the implementation of a **Single-Layer Neural Network** built entirely from scratch using NumPy. The objective of this project is to classify images from the CIFAR-10 dataset. 
+
+The project demonstrates a fundamental understanding of neural network architecture, including forward propagation, hand-derived analytical gradient computation (backward pass), loss functions (Cross-Entropy with L2 Regularization), and the Mini-batch Gradient Descent optimization algorithm. 
+
+The repository is structured into two main parts:
+1. `image_classifier.py`: The baseline single-layer network framework.
+2. `bonus_classifier.py`: An enhanced version implementing advanced training techniques to push the limits of a zero-hidden-layer architecture.
+
+---
+
+## 🛠️ Part 1: Basic Framework & Baseline (Exercise 1)
+
+### Implementation Details
+The foundational framework (`image_classifier.py`) includes the following core components:
+* **Data Pipeline:** Loading CIFAR-10 batches, transforming labels to one-hot encoding, and pre-processing data (zero-mean normalization based strictly on training set statistics).
+* **Forward Pass:** Linear transformation ($s = Wx + b$) followed by a Softmax activation function.
+* **Cost Function:** Computes the Cross-Entropy Loss combined with an L2 Regularization term to prevent over-fitting.
+* **Backward Pass:** Hand-derived analytical gradients for the weight matrix ($W$) and bias vector ($b$). *Note: The analytical gradients were rigorously tested against PyTorch's automatic differentiation, achieving a maximum absolute error at the $10^{-8}$ scale.*
+* **Training Loop:** Mini-batch Gradient Descent.
+
+### Baseline Experimental Results
+The baseline network was trained on a single batch (10,000 images) for 40 epochs across four different hyperparameter configurations:
+
+| Experiment | L2 Reg ($\lambda$) | Learning Rate ($\eta$) | Batch Size | Final Test Accuracy |
+| :--- | :---: | :---: | :---: | :---: |
+| **Exp 1** | 0 | 0.1 | 100 | 29.49% |
+| **Exp 2** | 0 | 0.001 | 100 | 39.21% |
+| **Exp 3** | 0.1 | 0.001 | 100 | **39.30%** |
+| **Exp 4** | 1.0 | 0.001 | 100 | 37.55% |
+
+**Analysis & Visualizations:**
+
+* **The Importance of a Correct Learning Rate ($\eta$):** A high learning rate ($\eta = 0.1$ in Exp 1) caused severe divergence, as seen below. The loss spikes uncontrollably.
+  
+  **Figure 1: High Learning Rate Divergence (Exp 1)**
+  ![High Learning Rate Loss Plot](images/loss_lam0_eta0.1_batch100.png)
+
+* **Baseline Generalization:** Experiment 3 ($\lambda=0.1$) yielded the best baseline generalization. However, even with mild regularization, a slight gap between validation and training loss begins to appear around epoch 30, suggesting the onset of over-fitting.
+  
+  **Figure 2: Baseline Best Practice (Exp 3)**
+  ![Baseline Convergence Loss Plot](images/loss_lam0.1_eta0.001_batch100.png)
+
+* **Weight Templates:** The visualization of the $W$ matrix (Figure 3) reveals that a single-layer network learns colors and vague contours rather than distinct shapes. You can see a fuzzy horse shape (green torso on green background) and a centered automobile contour.
+  
+  **Figure 3: Baseline Learnt Weight Templates (Exp 3)**
+  ![Baseline Fuzzy Weights Visualization](images/weights_lam0.1_eta0.001_batch100.png)
+
+---
+
+## 🚀 Part 2: Performance Improvements (Bonus 1)
+
+To maximize the performance of a simple linear classifier, several advanced techniques were implemented in `bonus_classifier.py`:
+
+### Enhancements Implemented
+1.  **Full Dataset Utilization:** Concatenated all 5 CIFAR-10 training batches, utilizing 49,000 images for training and 1,000 for validation.
+2.  **Data Augmentation:** Implemented an on-the-fly random horizontal flip with a 50% probability during training to force the network to learn translation-invariant features.
+3.  **Automated Grid Search:** Built a grid search mechanism to systematically find the optimal combination of $\lambda$, $\eta$, and batch size.
+4.  **Step Decay (Learning Rate):** Explored reducing the learning rate by a factor of 10 every 10 epochs. 
+
+### Final Results & Analysis
+Through Grid Search, the **optimal configuration** was found to be: 
+`n_batch = 100`, `eta = 0.001`, and `lam = 0.01`. 
+
+Using this configuration, the network underwent a final deep training phase of 100 epochs, achieving a **final test accuracy of 41.89%**.
+
+**Key Takeaways (Supported by Figures 4 & 5):**
+
+* **Eradication of Over-fitting:** The combination of Data Augmentation and a massive increase in training data proved incredibly effective. As shown in **Figure 4**, the validation loss flattened and remained entirely stable from epoch 40 to 100 without diverging upwards, proving that over-fitting was completely mitigated.
+
+  **Figure 4: 100-Epoch Final Loss Curve - Overfitting Eradicated**
+  ![Bonus 1 Final Deep Training Loss Plot](images/Bonus1_Final_Loss.png)
+
+* **Symmetrical Weight Templates:** Due to the 50% horizontal flipping, the learned weight templates (e.g., "horse" and "automobile") became highly symmetrical (Figure 5). The network successfully learned generalized, centered features (two-headed horse shape, perfectly centered symmetric truck) rather than memorizing orientation.
+
+  **Figure 5: 100-Epoch Final Learnt Weight Templates - Symmetric generalization**
+  ![Bonus 1 Final Symmetric Weights Visualization](images/Bonus1_Final_Weights.png)
