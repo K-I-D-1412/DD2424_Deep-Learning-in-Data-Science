@@ -76,31 +76,34 @@ def ApplyNetwork(X, network):
     
     s = np.dot(W, X) + b
     
-    # Softmax function
-    s_max = np.max(s, axis=0, keepdims=True)
-    e_s = np.exp(s - s_max) # The softmax function is invariant to the shift s -> s - c for any constant c, avoiding overflow
-    
-    P = e_s / np.sum(e_s, axis=0, keepdims=True)
+    # Sigmoid function instead of Softmax
+    # Use np.clip to prevent overflow
+    s_clipped = np.clip(s, -500, 500)
+    P = 1.0 / (1.0 + np.exp(-s_clipped))
     
     return P
 
 def ComputeLoss(P, y, network, lam):
     W = network['W']
-    n = P.shape[1]
+    K, n = P.shape
     
-    # Use numpy array indexing to get the correct probabilities
+    # Convert y to One-hot matrix Y
     y_arr = np.array(y)
-    correct_prob = P[y_arr, np.arange(n)]
+    Y = np.zeros((K, n), dtype=np.float32)
+    Y[y_arr, np.arange(n)] = 1.0
     
-    # Compute the cross-entropy loss
-    loss_cross = np.mean(-np.log(correct_prob + 1e-10)) # Add small epsilon to prevent log(0)
+    # Calculate Multiple Binary Cross-Entropy (BCE) Loss
+    # Formula: -(1/K) * sum( y*log(p) + (1-y)*log(1-p) )
+    term1 = Y * np.log(P + 1e-10)
+    term2 = (1 - Y) * np.log(1 - P + 1e-10)
     
-    # Compute the regularization loss
+    # Sum the loss for each class, divide by K, then average over all n samples
+    loss_bce = -np.mean(np.sum(term1 + term2, axis=0) / K)
+    
+    # Regularization part remains the same
     loss_reg = lam * np.sum(W * W)
     
-    # Total loss
-    J = loss_cross + loss_reg
-    
+    J = loss_bce + loss_reg
     return J
 
 def ComputeAccuracy(P, y):
@@ -111,10 +114,11 @@ def ComputeAccuracy(P, y):
 
 def BackwardPass(X, Y, P, network, lam):
     W = network['W']
-    n = X.shape[1]
+    K, n = P.shape
     
     # Gradient of loss w.r.t. s
-    G = P - Y # We have proved in lecture that dJ/ds = P - Y
+    # Compared to Softmax, divided by an additional K (K=10)
+    G = (P - Y) / K
     
     # Gradient of loss w.r.t. W
     grad_W = (1 / n) * np.dot(G, X.T) + 2 * lam * W
@@ -253,7 +257,7 @@ if __name__ == "__main__":
     # Set to False to skip Grid Search and load the saved parameters.
     # ---------------------------------------------------------
     PERFORM_GRID_SEARCH = True
-    params_file = "bonus_best_params.json"
+    params_file = "BCE_best_params.json"
     
     print("[Bonus 1] Loading the full dataset...")
     dataset_dir = "Datasets/cifar-10-batches-py"
@@ -271,7 +275,7 @@ if __name__ == "__main__":
         print("\nPreparing for grid search...")
         # Define candidate hyperparameter ranges for grid search.
         grid_lams = [0.0, 0.001, 0.01]
-        grid_etas = [0.01, 0.001]
+        grid_etas = [0.1, 0.01, 0.001]
         grid_batches = [100, 500]
         
         # Since we evaluate multiple combinations on the full 50,000 dataset,
@@ -359,6 +363,6 @@ if __name__ == "__main__":
     print(f"Using the best configuration, final Test Accuracy: {final_test_acc * 100:.2f}%")
     
     os.makedirs("images", exist_ok=True)
-    PlotLoss(train_history, val_history, "images/Bonus1_Final_Loss.png")
-    VisualizeWeights(final_trained_net['W'], "images/Bonus1_Final_Weights.png")
+    PlotLoss(train_history, val_history, "images/BCE_Loss.png")
+    VisualizeWeights(final_trained_net['W'], "images/BCE_Weights.png")
     print("Saved final training loss curves and weight visualizations to the 'images' directory.")
