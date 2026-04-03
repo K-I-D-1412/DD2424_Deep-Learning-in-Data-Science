@@ -105,3 +105,14 @@ After training for 100 epochs with data augmentation, the model achieved a **fin
 
   **Figure 7: Learnt Weight Templates (Multiple BCE)**
   ![BCE Weights Visualization](images/BCE_Weights.png)
+
+  ### Confidence Histogram Analysis
+To evaluate the qualitative difference in prediction confidence between the two architectures, histograms of the predicted probability for the **ground truth class** were generated for both correctly and incorrectly classified test examples.
+
+**Figure 8: Confidence Distribution (Softmax vs. Multiple BCE)**
+![Softmax Confidence Histogram](images/Softmax_Histogram.png)
+![BCE Confidence Histogram](images/BCE_Histogram.png)
+
+**Qualitative Differences:**
+1. **Softmax ("Winner-Takes-All"):** In the Softmax model, probabilities are forced to sum to 1. This creates a highly competitive distribution. Correct predictions (green) frequently reach high absolute probabilities (0.6 to 1.0). Conversely, when the network is incorrect (red), it assigns near-zero probability to the ground truth class because it is highly confident in a wrong class.
+2. **Multiple BCE / Sigmoid ("Independent Evaluation"):** The Sigmoid model treats each class independently. Noticeably, the entire distribution shifts significantly to the left. Even for correctly classified examples, the absolute probability assigned to the ground truth class peaks around 0.3 and rarely exceeds 0.6. The network doesn't need to push the absolute value to 1.0; it only needs the ground truth class score to be *relatively* higher than the other 9 independent classes to make a correct prediction.
