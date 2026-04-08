@@ -221,6 +221,34 @@ def VisualizeWeights(W, filename):
     plt.savefig(filename)
     plt.close()
 
+def PlotConfidenceHistograms(P, y, title, filename):
+    y_arr = np.array(y)
+    n = P.shape[1]
+    
+    # 1. Extract the predicted probabilities for the ground truth class
+    gt_probs = P[y_arr, np.arange(n)]
+    
+    # 2. Determine which samples were predicted correctly and which were predicted incorrectly
+    predictions = np.argmax(P, axis=0)
+    correct_mask = (predictions == y_arr)
+    
+    # 3. Separate the probabilities
+    probs_correct = gt_probs[correct_mask]
+    probs_incorrect = gt_probs[~correct_mask]
+    
+    # 4. Plot overlapping histograms
+    plt.figure(figsize=(10, 5))
+    plt.hist(probs_correct, bins=30, alpha=0.7, color='green', label='Correctly Classified')
+    plt.hist(probs_incorrect, bins=30, alpha=0.7, color='red', label='Incorrectly Classified')
+    
+    plt.xlabel('Probability of Ground Truth Class')
+    plt.ylabel('Number of Examples')
+    plt.title(title)
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.savefig(filename)
+    plt.close()
+
 def GenerateFlipIndices():
     aa = np.arange(32).reshape((32, 1))
     bb = np.arange(31, -1, -1).reshape((32, 1))
@@ -359,6 +387,7 @@ if __name__ == "__main__":
     # Evaluate the final model on the test set
     P_test = ApplyNetwork(X_test_norm, final_trained_net)
     final_test_acc = ComputeAccuracy(P_test, y_test)
+    PlotConfidenceHistograms(P_test, y_test, "BCE (Sigmoid) Confidence Histogram", "images/BCE_Histogram.png")
     print(f"\n Final deep training completed!")
     print(f"Using the best configuration, final Test Accuracy: {final_test_acc * 100:.2f}%")
     

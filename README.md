@@ -31,7 +31,7 @@ This repository contains a progressive series of image classifiers built **entir
 | [`bonus_image_classifier.py`](bonus_image_classifier.py) | **Assignment 1 — Bonus 1.** Enhanced single-layer Softmax classifier. Adds full dataset utilization (49k training), on-the-fly random horizontal flipping, automated grid search, and optional step decay for learning rate scheduling. |
 | [`BCE_image_classifier.py`](BCE_image_classifier.py) | **Assignment 1 — Bonus 2.** Single-layer classifier refactored with Sigmoid activation + Multiple Binary Cross-Entropy (BCE) loss. Key change: gradient scaled by 1/K, requiring a 10x larger learning rate. Also generates confidence histograms for qualitative comparison with Softmax. |
 | [`two_layer_image_classifier.py`](two_layer_image_classifier.py) | **Assignment 2 — Core.** Two-layer neural network (input → ReLU hidden → Softmax output). Introduces Cyclical Learning Rates (CLR), coarse-to-fine random search for λ on log-scale, and He initialization (`1/√d`). |
-| [`bonus_two_layer_image_classifier copy.py`](bonus_two_layer_image_classifier%20copy.py) | **Assignment 2 — Bonus.** Extended two-layer network with: network scaling (m=200), dual data augmentation (flipping + spatial translation ±3px), Inverted Dropout, and Adam optimizer support. Supports `optimizer='sgd'` and `optimizer='adam'` modes via a unified `MiniBatchGD` interface. |
+| [`bonus_two_layer_image_classifier.py`](bonus_two_layer_image_classifier.py) | **Assignment 2 — Bonus.** Extended two-layer network with: network scaling (m=200), dual data augmentation (flipping + spatial translation ±3px), Inverted Dropout, and Adam optimizer support. Supports `optimizer='sgd'` and `optimizer='adam'` modes via a unified `MiniBatchGD` interface. |
 | [`torch_gradient_computations.py`](torch_gradient_computations.py) | **Utility.** Uses PyTorch's autograd to independently compute gradients for verification against hand-derived analytical gradients (max error ~10⁻⁸). |
 
 ---
@@ -222,7 +222,7 @@ DD2424_Assignment1/
 ├── bonus_image_classifier.py
 ├── BCE_image_classifier.py
 ├── two_layer_image_classifier.py
-├── bonus_two_layer_image_classifier copy.py
+├── bonus_two_layer_image_classifier.py
 ├── torch_gradient_computations.py
 └── README.md
 ```
@@ -242,5 +242,5 @@ python BCE_image_classifier.py
 python two_layer_image_classifier.py
 
 # Assignment 2 — Bonus (Adam / Augmentation / Scaling)
-python "bonus_two_layer_image_classifier copy.py"
+python bonus_two_layer_image_classifier.py
 ```
