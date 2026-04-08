@@ -4,14 +4,35 @@
 > 
 > **Code of Honour**: If there are similar questions or labs or projects in the future, it is the responsibility of KTH students not to copy or modify these codes, or other files because it is against the [KTH EECS Code of Honour](https://www.kth.se/en/eecs/utbildning/hederskodex). The owner of this repository doesn't take any commitment for other's faults.
 
+---
+
 ## 📌 Project Overview
-This repository contains the implementation of a **Single-Layer Neural Network** built entirely from scratch using NumPy. The objective of this project is to classify images from the CIFAR-10 dataset. 
 
-The project demonstrates a fundamental understanding of neural network architecture, including forward propagation, hand-derived analytical gradient computation (backward pass), loss functions (Cross-Entropy with L2 Regularization), and the Mini-batch Gradient Descent optimization algorithm. 
+This repository contains a progressive series of image classifiers built **entirely from scratch** using NumPy, applied to the **CIFAR-10** dataset. Starting from a single-layer linear network and evolving to a two-layer neural network with advanced optimization, each stage introduces new techniques while preserving mathematical rigor — all gradients are hand-derived and analytically verified.
 
-The repository is structured into two main parts:
-1. `image_classifier.py`: The baseline single-layer network framework.
-2. `bonus_classifier.py`: An enhanced version implementing advanced training techniques to push the limits of a zero-hidden-layer architecture.
+### Performance Summary
+
+| Model | Architecture | Optimizer | Key Techniques | Test Accuracy |
+| :--- | :--- | :--- | :--- | :---: |
+| Baseline (Softmax) | Single-layer | SGD | — | 39.30% |
+| Bonus 1 (Softmax) | Single-layer | SGD | Full data, Augmentation, Grid Search | 42.02% |
+| Bonus 2 (BCE) | Single-layer | SGD | Sigmoid + BCE Loss, Full data, Augmentation | 41.92% |
+| Assignment 2 Baseline | Two-layer (m=50) | SGD + CLR | Cyclical LR, Coarse-to-Fine Search | 51.18% |
+| Assignment 2 Bonus (CLR) | Two-layer (m=200) | SGD + CLR | Dual Augmentation, Network Scaling | **56.51%** |
+| Assignment 2 Bonus (Adam) | Two-layer (m=200) | Adam | Adam Optimizer, Dual Augmentation | 54.18% |
+
+---
+
+## 📁 Code Files Reference
+
+| File | Description |
+| :--- | :--- |
+| [`image_classifier.py`](image_classifier.py) | **Assignment 1 — Baseline.** Single-layer Softmax classifier. Implements core pipeline: data loading, forward pass, cross-entropy + L2 loss, hand-derived analytical gradients, and mini-batch SGD. Runs 4 experiments with different hyperparameter configurations. |
+| [`bonus_image_classifier.py`](bonus_image_classifier.py) | **Assignment 1 — Bonus 1.** Enhanced single-layer Softmax classifier. Adds full dataset utilization (49k training), on-the-fly random horizontal flipping, automated grid search, and optional step decay for learning rate scheduling. |
+| [`BCE_image_classifier.py`](BCE_image_classifier.py) | **Assignment 1 — Bonus 2.** Single-layer classifier refactored with Sigmoid activation + Multiple Binary Cross-Entropy (BCE) loss. Key change: gradient scaled by 1/K, requiring a 10x larger learning rate. Also generates confidence histograms for qualitative comparison with Softmax. |
+| [`two_layer_image_classifier.py`](two_layer_image_classifier.py) | **Assignment 2 — Core.** Two-layer neural network (input → ReLU hidden → Softmax output). Introduces Cyclical Learning Rates (CLR), coarse-to-fine random search for λ on log-scale, and He initialization (`1/√d`). |
+| [`bonus_two_layer_image_classifier copy.py`](bonus_two_layer_image_classifier%20copy.py) | **Assignment 2 — Bonus.** Extended two-layer network with: network scaling (m=200), dual data augmentation (flipping + spatial translation ±3px), Inverted Dropout, and Adam optimizer support. Supports `optimizer='sgd'` and `optimizer='adam'` modes via a unified `MiniBatchGD` interface. |
+| [`torch_gradient_computations.py`](torch_gradient_computations.py) | **Utility.** Uses PyTorch's autograd to independently compute gradients for verification against hand-derived analytical gradients (max error ~10⁻⁸). |
 
 ---
 
@@ -35,7 +56,7 @@ The baseline network was trained on a single batch (10,000 images) for 40 epochs
 | **Exp 3** | 0.1 | 0.001 | 100 | **39.30%** |
 | **Exp 4** | 1.0 | 0.001 | 100 | 37.55% |
 
-**Analysis & Visualizations:**
+### Analysis & Visualizations
 
 * **The Importance of a Correct Learning Rate ($\eta$):** A high learning rate ($\eta = 0.1$ in Exp 1) caused severe divergence, as seen below. The loss spikes uncontrollably.
   
@@ -56,7 +77,7 @@ The baseline network was trained on a single batch (10,000 images) for 40 epochs
 
 ## 🚀 Part 2: Performance Improvements (Exercise 2.1 / Bonus 1)
 
-To maximize the performance of a simple linear classifier, several advanced techniques were implemented in `bonus_classifier.py`:
+To maximize the performance of a simple linear classifier, several advanced techniques were implemented in `bonus_image_classifier.py`:
 
 ### Enhancements Implemented
 1.  **Full Dataset Utilization:** Concatenated all 5 CIFAR-10 training batches, utilizing 49,000 images for training and 1,000 for validation.
@@ -106,7 +127,7 @@ After training for 100 epochs with data augmentation, the model achieved a **fin
   **Figure 7: Learnt Weight Templates (Multiple BCE)**
   ![BCE Weights Visualization](images/BCE_Weights.png)
 
-  ### Confidence Histogram Analysis
+### Confidence Histogram Analysis
 To evaluate the qualitative difference in prediction confidence between the two architectures, histograms of the predicted probability for the **ground truth class** were generated for both correctly and incorrectly classified test examples.
 
 **Figure 8: Confidence Distribution (Softmax vs. Multiple BCE)**
@@ -116,3 +137,110 @@ To evaluate the qualitative difference in prediction confidence between the two 
 **Qualitative Differences:**
 1. **Softmax ("Winner-Takes-All"):** In the Softmax model, probabilities are forced to sum to 1. This creates a highly competitive distribution. Correct predictions (green) frequently reach high absolute probabilities (0.6 to 1.0). Conversely, when the network is incorrect (red), it assigns near-zero probability to the ground truth class because it is highly confident in a wrong class.
 2. **Multiple BCE / Sigmoid ("Independent Evaluation"):** The Sigmoid model treats each class independently. Noticeably, the entire distribution shifts significantly to the left. Even for correctly classified examples, the absolute probability assigned to the ground truth class peaks around 0.3 and rarely exceeds 0.6. The network doesn't need to push the absolute value to 1.0; it only needs the ground truth class score to be *relatively* higher than the other 9 independent classes to make a correct prediction.
+
+---
+
+## 🚀 Part 4: Two-Layer Neural Network & Cyclical Learning Rates (Assignment 2)
+
+Building upon the single-layer baseline, the project was expanded to implement a **Two-Layer Neural Network** with a ReLU activation function in the hidden layer. This phase introduced advanced training methodologies, heavily focusing on learning rate scheduling and hyperparameter optimization.
+
+### 1. Architecture & Sanity Check
+Before training on the full dataset, the analytical gradients (derived by hand and vectorized in NumPy) were strictly verified. By temporarily disabling L2 regularization ($\lambda = 0$) and training on a micro-batch of 100 images, the network successfully overfitted the data, driving the loss to near zero. This confirmed the mathematical correctness of the backpropagation implementation.
+
+**Figure 9: Sanity Check (Overfitting 100 Images)**
+![Sanity Check Loss](images/Assignment2/sanity_check_loss.png)
+
+### 2. Cyclical Learning Rates (CLR)
+To eliminate the need for exhaustive learning rate tuning and to prevent the network from getting stuck in saddle points or local minima, **Cyclical Learning Rates (CLR)** were implemented. The learning rate oscillates in a triangular schedule between a defined $\eta_{min}$ and $\eta_{max}$.
+
+**Figure 10: Training Metrics over One Cycle vs. Three Cycles**
+![CLR One Cycle](images/Assignment2/Figure3_One_Cycle.png)
+![CLR Three Cycles](images/Assignment2/Figure4_Three_Cycles.png)
+*Observation: The cyclical nature of the learning rate creates distinct "waves" in the cost and accuracy plots. Each cycle allows the network to jump out of suboptimal minima, progressively refining the generalization.*
+
+### 3. Hyperparameter Search & Baseline Final Training
+A **Coarse-to-Fine Random Search** was conducted on a logarithmic scale to find the optimal L2 regularization penalty ($\lambda$). 
+* **Baseline Configuration:** Hidden nodes $m=50$, trained for 3 full cycles.
+* **Optimal $\lambda$:** $\approx 0.000094$
+* **Result:** The baseline two-layer network achieved a final test accuracy of **51.18%**.
+
+**Figure 11: Final Baseline Training (m=50)**
+![Baseline Final Training](images/Assignment2/Figure5_Final_Training.png)
+
+---
+
+## 🏆 Part 5: Advanced Optimizations & Network Scaling (Bonus)
+
+To push the limits of the two-layer architecture, several advanced techniques were systematically tested and combined.
+
+### 1. Network Expansion & Dual Data Augmentation
+The network capacity was significantly increased by quadrupling the hidden nodes from $m=50$ to $m=200$. To prevent this highly parameterized network from overfitting, a robust dual data augmentation strategy was introduced:
+* **Random Horizontal Flipping (Mirroring):** Pre-computed pixel-index permutation for efficient vectorized flipping at 50% probability.
+* **Random Spatial Translations:** Each image randomly shifted by ($\pm 3$ pixels) in both x and y directions with zero-padding.
+
+**Result:** Training this expanded architecture for 5 cycles yielded a massive performance jump, achieving a final test accuracy of **56.51%** (an absolute improvement of +5.33% over the baseline). The aggressive data augmentation acted as an exceptionally strong regularizer, keeping the validation curves tightly tracking the training curves.
+
+**Figure 12: Expanded Network Training (m=200, 5 Cycles, Augmented)**
+![M200 Final Training](images/Assignment2/Figure5_Final_Training_m200_5cycles.png)
+
+*Note on Dropout:* An experiment was conducted using Inverted Dropout in the hidden layer. However, combining Dropout with aggressive data transformations resulted in **over-regularization** (underfitting) for a network of this capacity.
+
+### 2. Optimizer Showdown: Adam vs. SGD with CLR
+As a final experiment, the cyclical learning rate schedule was replaced with the **Adam Optimizer** using a fixed base learning rate ($\eta = 5 \times 10^{-4}$). The Adam optimizer combines the benefits of Momentum and RMSprop with bias-corrected first and second moment estimates.
+
+**Result:** Adam achieved a final test accuracy of **54.18%**. 
+
+**Figure 13: Adam Optimizer Training Curves**
+![Adam Training](images/Assignment2/Figure6_Final_Training_Adam.png)
+
+**Key Takeaway (Adam vs. CLR):**
+While the Adam optimizer provided remarkably smooth curves and rapid initial convergence, it slightly underperformed compared to SGD with Cyclical Learning Rates (56.51%). This experiment practically highlights a known deep learning phenomenon: the periodic large learning rate spikes in CLR act as a powerful *implicit regularizer*, forcing the network to settle into wider, more robust global minima, whereas Adam can sometimes converge too quickly into sharper local minima.
+
+---
+
+## 🔧 Setup & Reproduction
+
+### Prerequisites
+* Python 3.x
+* NumPy, Matplotlib, Pickle
+* (Optional) PyTorch — only for gradient verification via `torch_gradient_computations.py`
+
+### Dataset
+Download the [CIFAR-10 Python version](https://www.cs.toronto.edu/~kriz/cifar.html) and place the extracted `cifar-10-batches-py` folder under `Datasets/`.
+
+```
+DD2424_Assignment1/
+├── Datasets/
+│   └── cifar-10-batches-py/
+│       ├── data_batch_1
+│       ├── ...
+│       └── test_batch
+├── images/
+│   ├── Assignment2/
+│   └── ...
+├── image_classifier.py
+├── bonus_image_classifier.py
+├── BCE_image_classifier.py
+├── two_layer_image_classifier.py
+├── bonus_two_layer_image_classifier copy.py
+├── torch_gradient_computations.py
+└── README.md
+```
+
+### Running
+```bash
+# Assignment 1 — Baseline (4 experiments)
+python image_classifier.py
+
+# Assignment 1 — Bonus 1 (Grid Search + Final Training)
+python bonus_image_classifier.py
+
+# Assignment 1 — Bonus 2 (BCE Loss)
+python BCE_image_classifier.py
+
+# Assignment 2 — Core (CLR + Coarse-to-Fine Search)
+python two_layer_image_classifier.py
+
+# Assignment 2 — Bonus (Adam / Augmentation / Scaling)
+python "bonus_two_layer_image_classifier copy.py"
+```

@@ -72,8 +72,19 @@ def InitParameters(d, m=50, K=10, seed=42):
     b2 = np.zeros((K, 1)).astype(np.float32)
     
     return {'W': [W1, W2], 'b': [b1, b2]}
+
+def InitAdamStates(network):
+    m = {
+        'W': [np.zeros_like(network['W'][0]), np.zeros_like(network['W'][1])],
+        'b': [np.zeros_like(network['b'][0]), np.zeros_like(network['b'][1])]
+    }
+    v = {
+        'W': [np.zeros_like(network['W'][0]), np.zeros_like(network['W'][1])],
+        'b': [np.zeros_like(network['b'][0]), np.zeros_like(network['b'][1])]
+    }
+    return m, v
     
-def ApplyNetwork(X, network):
+def ApplyNetwork(X, network, keep_prob=1.0):
     W1, W2 = network['W'][0], network['W'][1]
     b1, b2 = network['b'][0], network['b'][1]
     
@@ -83,6 +94,14 @@ def ApplyNetwork(X, network):
     # 2. ReLU activation function (negative numbers become 0, positive numbers remain unchanged)
     h = np.maximum(0, s1)
     
+    # Dropout
+    if keep_prob < 1.0:
+        # Generate mask U: generate 1 with probability keep_prob, otherwise 0. Then divide by keep_prob for inverse scaling
+        U = (np.random.rand(*h.shape) < keep_prob).astype(np.float32) / keep_prob
+        h = h * U  # Apply mask, turn off some neurons
+    else:
+        U = None # Testing/evaluation phase, do not use Dropout
+    
     # 3. Layer 2 linear calculation
     s = np.dot(W2, h) + b2
     
@@ -91,7 +110,8 @@ def ApplyNetwork(X, network):
     e_s = np.exp(s - s_max) # prevent overflow
     P = e_s / np.sum(e_s, axis=0, keepdims=True)
     
-    fp_data = {'X': X, 's1': s1, 'h': h}
+    # Must save the Dropout mask U for backpropagation
+    fp_data = {'X': X, 's1': s1, 'h': h, 'U': U}
     
     return P, fp_data
 
@@ -120,6 +140,71 @@ def ComputeAccuracy(P, y):
     
     return accuracy
 
+def GenerateFlipIndices():
+    aa = np.arange(32).reshape((32, 1))
+    bb = np.arange(31, -1, -1).reshape((32, 1))
+    vv = np.tile(32 * aa, (1, 32))
+    ind_flip = vv.reshape((1024, 1)) + np.tile(bb, (32, 1))
+    
+    # Combine RGB three channels index
+    inds_flip = np.vstack((ind_flip, 1024 + ind_flip, 2048 + ind_flip))
+    # Flatten into a one-dimensional array for matrix indexing
+    return inds_flip.flatten()
+
+def FlipImages(X_batch, flip_indices):
+    n_images = X_batch.shape[1]
+    # Generate a boolean array with approximately 50% True values
+    flip_mask = np.random.rand(n_images) < 0.5
+    
+    # Deep copy the data to avoid modifying the original dataset
+    X_flipped = np.copy(X_batch)
+    
+    # Use numpy advanced indexing:
+    # X_batch[flip_indices, :] will shuffle the rows of the image into flipped order
+    # [:, flip_mask] ensures that we only assign the flipped data to the selected 50% of images
+    X_flipped[:, flip_mask] = X_batch[flip_indices, :][:, flip_mask]
+    
+    return X_flipped
+
+def TranslateImages(X_batch, max_trans=3):
+
+    n_images = X_batch.shape[1]
+    
+    # 1. Transform (3072, n_images) to (n_images, 3, 32, 32) for spatial slicing
+    X_reshaped = X_batch.T.reshape(n_images, 3, 32, 32)
+    X_trans_reshaped = np.zeros_like(X_reshaped) # 背景默认补零
+    
+    for i in range(n_images):
+        # Randomly generate x and y direction translation amounts (-3 to 3)
+        tx = np.random.randint(-max_trans, max_trans + 1)
+        ty = np.random.randint(-max_trans, max_trans + 1)
+        
+        # If there is no translation, copy directly
+        if tx == 0 and ty == 0:
+            X_trans_reshaped[i] = X_reshaped[i]
+            continue
+            
+        # Calculate the slice range of the source image
+        x_start_src = max(0, -tx)
+        x_end_src = min(32, 32 - tx)
+        y_start_src = max(0, -ty)
+        y_end_src = min(32, 32 - ty)
+        
+        # Calculate the slice range of the destination image
+        x_start_dst = max(0, tx)
+        x_end_dst = min(32, 32 + tx)
+        y_start_dst = max(0, ty)
+        y_end_dst = min(32, 32 + ty)
+        
+        # Paste the effective part of the original image to the corresponding position of the new canvas
+        X_trans_reshaped[i, :, y_start_dst:y_end_dst, x_start_dst:x_end_dst] = \
+            X_reshaped[i, :, y_start_src:y_end_src, x_start_src:x_end_src]
+            
+    # 2. Flatten the processed images back to (3072, n_images)
+    X_trans = X_trans_reshaped.reshape(n_images, 3072).T
+    
+    return X_trans
+
 def ComputeLearningRate(t, eta_min, eta_max, n_s):
     # Compute the current epoch number
     l = t // (2 * n_s)
@@ -139,7 +224,8 @@ def BackwardPass(X, Y, P, fp_data,network, lam):
     W1, W2 = network['W'][0], network['W'][1]
     h = fp_data['h']
     s1 = fp_data['s1']
-    
+    U = fp_data['U']
+
     n = X.shape[1] # number of samples
 
     # layer 2:
@@ -156,6 +242,10 @@ def BackwardPass(X, Y, P, fp_data,network, lam):
     # Gradient of loss w.r.t. h
     G_hidden = np.dot(W2.T, G)
     
+    # Dropout: turn off the gradient of the closed neurons
+    if U is not None:
+        G_hidden = G_hidden * U
+    
     # Gradient of loss w.r.t. s1
     G_hidden[s1 <= 0] = 0
 
@@ -167,13 +257,19 @@ def BackwardPass(X, Y, P, fp_data,network, lam):
     
     return {'W': [grad_W1, grad_W2], 'b': [grad_b1, grad_b2]}
 
-def MiniBatchGD(X_train, Y_train, y_train, X_val, Y_val, y_val, GDparams, init_net, lam):
+def MiniBatchGD(X_train, Y_train, y_train, X_val, Y_val, y_val, GDparams, init_net, lam, augment_data=False, keep_prob=1.0, optimizer='sgd'):
     n = X_train.shape[1]
     n_batch = GDparams['n_batch']
     n_epochs = GDparams['n_epochs']
-    eta_min = GDparams['eta_min']
-    eta_max = GDparams['eta_max']
-    n_s = GDparams['n_s']
+    
+    if optimizer == 'sgd':
+        eta_min = GDparams['eta_min']
+        eta_max = GDparams['eta_max']
+        n_s = GDparams['n_s']
+    elif optimizer == 'adam':
+        eta = GDparams['eta'] # Adam Use fixed learning rate
+        beta1, beta2, epsilon = 0.9, 0.999, 1e-8
+        m_state, v_state = InitAdamStates(init_net)
 
     network = copy.deepcopy(init_net)
 
@@ -188,6 +284,9 @@ def MiniBatchGD(X_train, Y_train, y_train, X_val, Y_val, y_val, GDparams, init_n
     
     t = 0 # Global update step counter t
 
+    if augment_data:
+        flip_indices = GenerateFlipIndices()
+
     for epoch in range(n_epochs):
         for j in range(n // n_batch):
             j_start = j * n_batch
@@ -196,21 +295,44 @@ def MiniBatchGD(X_train, Y_train, y_train, X_val, Y_val, y_val, GDparams, init_n
             X_batch = X_train[:, j_start:j_end]
             Y_batch = Y_train[:, j_start:j_end]
             
+            if augment_data:
+                X_batch = FlipImages(X_batch, flip_indices)
+                X_batch = TranslateImages(X_batch, max_trans=3)
+            
             # Compute the forward pass
-            P_batch, fp_data = ApplyNetwork(X_batch, network)
+            P_batch, fp_data = ApplyNetwork(X_batch, network, keep_prob=keep_prob)
             
             # Compute backward pass
             grads = BackwardPass(X_batch, Y_batch, P_batch, fp_data, network, lam)
 
-            eta_t = ComputeLearningRate(t, eta_min, eta_max, n_s)
+            if optimizer == 'sgd':
+                # SGD + CLR Update Logic
+                eta_t = ComputeLearningRate(t, eta_min, eta_max, n_s)
+                for l in range(2):
+                    network['W'][l] -= eta_t * grads['W'][l]
+                    network['b'][l] -= eta_t * grads['b'][l]
             
-            # Update the parameters
-            network['W'][0] -= eta_t * grads['W'][0]
-            network['b'][0] -= eta_t * grads['b'][0]
-            network['W'][1] -= eta_t * grads['W'][1]
-            network['b'][1] -= eta_t * grads['b'][1]
-
-            t += 1
+            elif optimizer == 'adam':
+                # Adam Update Logic
+                t += 1  # Adam bias correction needs t starting from 1
+                for l in range(2): # Iterate through two layers
+                    for param in ['W', 'b']: # Iterate through weights and biases
+                        grad = grads[param][l]
+                        
+                        # 1. Update biased first-order moment estimate (Momentum)
+                        m_state[param][l] = beta1 * m_state[param][l] + (1 - beta1) * grad
+                        # 2. Update biased second-order moment estimate (RMSprop)
+                        v_state[param][l] = beta2 * v_state[param][l] + (1 - beta2) * (grad ** 2)
+                        
+                        # 3. Compute bias-corrected estimates
+                        m_hat = m_state[param][l] / (1 - beta1 ** t)
+                        v_hat = v_state[param][l] / (1 - beta2 ** t)
+                        
+                        # 4. Update network parameters
+                        network[param][l] -= eta * m_hat / (np.sqrt(v_hat) + epsilon)
+            
+            if optimizer == 'sgd':
+                t += 1
             
         # Calculate the cost
         P_train, _ = ApplyNetwork(X_train, network)
@@ -275,31 +397,34 @@ if __name__ == "__main__":
     X_test, Y_test, y_test = LoadBatch(os.path.join(dataset_dir, "test_batch"))
     
     # ---------------------------------------------------------
-    # 🚀 PART A: Fine Search (验证集 5000)
+    # 🚀 PART A: Fine Search for Adam (验证集 5000, m=200)
     # ---------------------------------------------------------
-    print("\n=== PART A: Fine Search ===")
+    print("\n=== PART A: Fine Search (Adam Optimizer, m=200, Augmentation=True) ===")
     X_train_f, Y_train_f, y_train_f, X_val_f, Y_val_f, y_val_f = LoadAllData(dataset_dir, val_size=5000)
     X_train_f_n, X_val_f_n, _ = PreProcess(X_train_f, X_val_f, X_test)
     
     rng = np.random.default_rng(99)
-    # 缩小搜索范围：1e-5 到 1e-4 之间
+    # Adam 的正则化需求通常比较小，我们依然在 1e-5 到 1e-4 之间搜索
     l_min, l_max = -5, -4 
-    n_s_fine = 2 * (X_train_f_n.shape[1] // 100) # 900
     
     best_val_acc = 0
     best_lam = 0
     
-    for i in range(4): # 只测 4 次节约时间
+    for i in range(4): # 测 4 次
         l = l_min + (l_max - l_min) * rng.random()
         lam = 10 ** l
-        print(f"Testing lambda = {lam:.6f}...")
+        print(f"Testing lambda = {lam:.6f} with Adam...")
         
-        network = InitParameters(d=X_train_f_n.shape[0])
-        GDparams_fine = {'n_batch': 100, 'eta_min': 1e-5, 'eta_max': 1e-1, 'n_s': n_s_fine, 'n_epochs': 8}
+        network = InitParameters(d=X_train_f_n.shape[0], m=200)
         
+        # === 修改 1: Adam 不需要 CLR 参数，只需要固定 eta ===
+        GDparams_fine = {'n_batch': 100, 'eta': 5e-4, 'n_epochs': 8}
+        
+        # === 修改 2: 加上 optimizer='adam', 确保 keep_prob=1.0 (关闭 Dropout) ===
         _, _, _, _, _, _, val_acc_hist = MiniBatchGD(
             X_train_f_n, Y_train_f, y_train_f, X_val_f_n, Y_val_f, y_val_f, 
-            GDparams_fine, network, lam
+            GDparams_fine, network, lam, 
+            augment_data=True, keep_prob=1.0, optimizer='adam'
         )
         
         max_acc = max(val_acc_hist)
@@ -307,34 +432,37 @@ if __name__ == "__main__":
             best_val_acc = max_acc
             best_lam = lam
 
-    print(f"\n🏆 Fine Search Winner: lambda = {best_lam:.6f} (Validation Acc: {best_val_acc*100:.2f}%)")
+    print(f"\n🏆 Adam Fine Search Winner: lambda = {best_lam:.6f} (Validation Acc: {best_val_acc*100:.2f}%)")
     
     # ---------------------------------------------------------
-    # 🚀 PART B: Final Training (验证集 1000)
+    # 🚀 PART B: Final Training with Adam
     # ---------------------------------------------------------
-    print("\n=== PART B: Final Training (3 Cycles) ===")
+    print("\n=== PART B: Final Training (Adam, 20 Epochs, m=200) ===")
     X_train_final, Y_train_final, y_train_final, X_val_final, Y_val_final, y_val_final = LoadAllData(dataset_dir, val_size=1000)
     X_train_final_n, X_val_final_n, X_test_n = PreProcess(X_train_final, X_val_final, X_test)
     
     print(f"Final Training Set Size: {X_train_final_n.shape[1]}")
     
-    n_s_final = 2 * (X_train_final_n.shape[1] // 100) # 980
-    n_epochs_final = 12 # 3 cycles * 4 epochs/cycle = 12 epochs
+    n_epochs_final = 20 # Adam 收敛很快，20 个 Epochs 应该足够看出威力了
     
-    final_network = InitParameters(d=X_train_final_n.shape[0])
-    GDparams_final = {'n_batch': 100, 'eta_min': 1e-5, 'eta_max': 1e-1, 'n_s': n_s_final, 'n_epochs': n_epochs_final}
+    final_network = InitParameters(d=X_train_final_n.shape[0], m=200)
     
+    # 同样只传固定学习率 eta
+    GDparams_final = {'n_batch': 100, 'eta': 5e-4, 'n_epochs': n_epochs_final}
+    
+    # 开启 Adam 优化器进行终极训练
     trained_net_final, train_cost, val_cost, train_loss, val_loss, train_acc, val_acc = MiniBatchGD(
         X_train_final_n, Y_train_final, y_train_final, 
         X_val_final_n, Y_val_final, y_val_final, 
-        GDparams_final, final_network, best_lam
+        GDparams_final, final_network, best_lam, 
+        augment_data=True, keep_prob=1.0, optimizer='adam'
     )
     
     # 测试集表现
     P_test, _ = ApplyNetwork(X_test_n, trained_net_final)
     final_test_acc = ComputeAccuracy(P_test, y_test)
     
-    # 画终极图表
+    # === 图表标题和保存的文件名更新为 Adam ===
     os.makedirs("images/Assignment2", exist_ok=True)
     epochs_range = range(1, n_epochs_final + 1)
     fig, axs = plt.subplots(1, 2, figsize=(12, 5))
@@ -343,22 +471,23 @@ if __name__ == "__main__":
     axs[0].plot(epochs_range, val_loss, label='Validation loss', color='red')
     axs[0].set_xlabel('Epochs')
     axs[0].set_ylabel('Loss')
-    axs[0].set_title('Final Loss Plot')
+    axs[0].set_title('Final Loss Plot (m=200, Adam)')
     axs[0].legend()
     
     axs[1].plot(epochs_range, train_acc, label='Training accuracy', color='green')
     axs[1].plot(epochs_range, val_acc, label='Validation accuracy', color='red')
     axs[1].set_xlabel('Epochs')
     axs[1].set_ylabel('Accuracy')
-    axs[1].set_title('Final Accuracy Plot')
+    axs[1].set_title('Final Accuracy Plot (m=200, Adam)')
     axs[1].legend()
     
     plt.tight_layout()
-    plt.savefig("images/Assignment2/Figure5_Final_Training.png")
+    plt.savefig("images/Assignment2/Figure6_Final_Training_Adam.png")
     plt.close()
     
     print("\n==========================================")
-    print("🎓 ASSIGNMENT 2 CORE EXERCISES COMPLETED!")
-    print(f"Final Test Accuracy: {final_test_acc * 100:.2f}%")
-    print("Images saved. Ready to write the final report!")
+    print("🎓 ADAM OPTIMIZER EXERCISE COMPLETED!")
+    print(f"Network Configuration: m=200, Augmentation=True, Optimizer=Adam")
+    print(f"🚀 Final Test Accuracy: {final_test_acc * 100:.2f}%")
+    print("Images saved as 'Figure6_Final_Training_Adam.png'.")
     print("==========================================")
