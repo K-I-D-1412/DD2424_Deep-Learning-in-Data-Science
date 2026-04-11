@@ -274,22 +274,20 @@ if __name__ == "__main__":
     dataset_dir = "Datasets/cifar-10-batches-py"
     X_test, Y_test, y_test = LoadBatch(os.path.join(dataset_dir, "test_batch"))
     
-    # ---------------------------------------------------------
-    # 🚀 PART A: Fine Search (验证集 5000)
-    # ---------------------------------------------------------
+    # 1: Fine Search (validation set 5000)
     print("\n=== PART A: Fine Search ===")
     X_train_f, Y_train_f, y_train_f, X_val_f, Y_val_f, y_val_f = LoadAllData(dataset_dir, val_size=5000)
     X_train_f_n, X_val_f_n, _ = PreProcess(X_train_f, X_val_f, X_test)
     
     rng = np.random.default_rng(99)
-    # 缩小搜索范围：1e-5 到 1e-4 之间
+    # Search range: 1e-5 to 1e-4
     l_min, l_max = -5, -4 
     n_s_fine = 2 * (X_train_f_n.shape[1] // 100) # 900
     
     best_val_acc = 0
     best_lam = 0
     
-    for i in range(4): # 只测 4 次节约时间
+    for i in range(4): 
         l = l_min + (l_max - l_min) * rng.random()
         lam = 10 ** l
         print(f"Testing lambda = {lam:.6f}...")
@@ -307,11 +305,9 @@ if __name__ == "__main__":
             best_val_acc = max_acc
             best_lam = lam
 
-    print(f"\n🏆 Fine Search Winner: lambda = {best_lam:.6f} (Validation Acc: {best_val_acc*100:.2f}%)")
+    print(f"\n Fine Search Winner: lambda = {best_lam:.6f} (Validation Acc: {best_val_acc*100:.2f}%)")
     
-    # ---------------------------------------------------------
-    # 🚀 PART B: Final Training (验证集 1000)
-    # ---------------------------------------------------------
+    # 2: Final Training (validation set 1000)
     print("\n=== PART B: Final Training (3 Cycles) ===")
     X_train_final, Y_train_final, y_train_final, X_val_final, Y_val_final, y_val_final = LoadAllData(dataset_dir, val_size=1000)
     X_train_final_n, X_val_final_n, X_test_n = PreProcess(X_train_final, X_val_final, X_test)
@@ -330,11 +326,9 @@ if __name__ == "__main__":
         GDparams_final, final_network, best_lam
     )
     
-    # 测试集表现
     P_test, _ = ApplyNetwork(X_test_n, trained_net_final)
     final_test_acc = ComputeAccuracy(P_test, y_test)
     
-    # 画终极图表
     os.makedirs("images/Assignment2", exist_ok=True)
     epochs_range = range(1, n_epochs_final + 1)
     fig, axs = plt.subplots(1, 2, figsize=(12, 5))
@@ -358,7 +352,6 @@ if __name__ == "__main__":
     plt.close()
     
     print("\n==========================================")
-    print("🎓 ASSIGNMENT 2 CORE EXERCISES COMPLETED!")
+    print(" ASSIGNMENT 2 CORE EXERCISES COMPLETED!")
     print(f"Final Test Accuracy: {final_test_acc * 100:.2f}%")
-    print("Images saved. Ready to write the final report!")
     print("==========================================")

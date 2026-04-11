@@ -396,98 +396,103 @@ if __name__ == "__main__":
     dataset_dir = "Datasets/cifar-10-batches-py"
     X_test, Y_test, y_test = LoadBatch(os.path.join(dataset_dir, "test_batch"))
     
-    # ---------------------------------------------------------
-    # 🚀 PART A: Fine Search for Adam (验证集 5000, m=200)
-    # ---------------------------------------------------------
-    print("\n=== PART A: Fine Search (Adam Optimizer, m=200, Augmentation=True) ===")
-    X_train_f, Y_train_f, y_train_f, X_val_f, Y_val_f, y_val_f = LoadAllData(dataset_dir, val_size=5000)
-    X_train_f_n, X_val_f_n, _ = PreProcess(X_train_f, X_val_f, X_test)
-    
-    rng = np.random.default_rng(99)
-    # Adam 的正则化需求通常比较小，我们依然在 1e-5 到 1e-4 之间搜索
-    l_min, l_max = -5, -4 
-    
-    best_val_acc = 0
-    best_lam = 0
-    
-    for i in range(4): # 测 4 次
-        l = l_min + (l_max - l_min) * rng.random()
-        lam = 10 ** l
-        print(f"Testing lambda = {lam:.6f} with Adam...")
-        
-        network = InitParameters(d=X_train_f_n.shape[0], m=200)
-        
-        # === 修改 1: Adam 不需要 CLR 参数，只需要固定 eta ===
-        GDparams_fine = {'n_batch': 100, 'eta': 5e-4, 'n_epochs': 8}
-        
-        # === 修改 2: 加上 optimizer='adam', 确保 keep_prob=1.0 (关闭 Dropout) ===
-        _, _, _, _, _, _, val_acc_hist = MiniBatchGD(
-            X_train_f_n, Y_train_f, y_train_f, X_val_f_n, Y_val_f, y_val_f, 
-            GDparams_fine, network, lam, 
-            augment_data=True, keep_prob=1.0, optimizer='adam'
-        )
-        
-        max_acc = max(val_acc_hist)
-        if max_acc > best_val_acc:
-            best_val_acc = max_acc
-            best_lam = lam
-
-    print(f"\n🏆 Adam Fine Search Winner: lambda = {best_lam:.6f} (Validation Acc: {best_val_acc*100:.2f}%)")
-    
-    # ---------------------------------------------------------
-    # 🚀 PART B: Final Training with Adam
-    # ---------------------------------------------------------
-    print("\n=== PART B: Final Training (Adam, 20 Epochs, m=200) ===")
     X_train_final, Y_train_final, y_train_final, X_val_final, Y_val_final, y_val_final = LoadAllData(dataset_dir, val_size=1000)
     X_train_final_n, X_val_final_n, X_test_n = PreProcess(X_train_final, X_val_final, X_test)
     
     print(f"Final Training Set Size: {X_train_final_n.shape[1]}")
+    os.makedirs("images/Assignment2", exist_ok=True)
     
-    n_epochs_final = 20 # Adam 收敛很快，20 个 Epochs 应该足够看出威力了
+    # 1: The Best Model (SGD + CLR, m=200, Dual Augmentation)
+    print("\n=== EXPERIMENT 1: Best Model (SGD+CLR, m=200, Augmentation) ===")
+    net_1 = InitParameters(d=X_train_final_n.shape[0], m=200)
     
-    final_network = InitParameters(d=X_train_final_n.shape[0], m=200)
+    # 5 cycles (20 epochs), n_s = 980, lambda = 0.000094
+    GDparams_1 = {'n_batch': 100, 'eta_min': 1e-5, 'eta_max': 1e-1, 'n_s': 980, 'n_epochs': 20}
+    lam_1 = 0.000094
     
-    # 同样只传固定学习率 eta
-    GDparams_final = {'n_batch': 100, 'eta': 5e-4, 'n_epochs': n_epochs_final}
-    
-    # 开启 Adam 优化器进行终极训练
-    trained_net_final, train_cost, val_cost, train_loss, val_loss, train_acc, val_acc = MiniBatchGD(
+    trained_net_1, _, _, train_loss_1, val_loss_1, train_acc_1, val_acc_1 = MiniBatchGD(
         X_train_final_n, Y_train_final, y_train_final, 
         X_val_final_n, Y_val_final, y_val_final, 
-        GDparams_final, final_network, best_lam, 
+        GDparams_1, net_1, lam_1, 
+        augment_data=True, keep_prob=1.0, optimizer='sgd'
+    )
+    
+    P_test_1, _ = ApplyNetwork(X_test_n, trained_net_1, keep_prob=1.0)
+    test_acc_1 = ComputeAccuracy(P_test_1, y_test)
+    print(f"Best Model Test Accuracy: {test_acc_1 * 100:.2f}% (Expected ~56.51%)")
+    
+    epochs_range = range(1, 21)
+    fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+    axs[0].plot(epochs_range, train_loss_1, label='Training loss', color='green')
+    axs[0].plot(epochs_range, val_loss_1, label='Validation loss', color='red')
+    axs[0].set_xlabel('Epochs')
+    axs[0].set_ylabel('Loss')
+    axs[0].set_title('Final Loss Plot (m=200, 5 Cycles, SGD+CLR)')
+    axs[0].legend()
+    
+    axs[1].plot(epochs_range, train_acc_1, label='Training accuracy', color='green')
+    axs[1].plot(epochs_range, val_acc_1, label='Validation accuracy', color='red')
+    axs[1].set_xlabel('Epochs')
+    axs[1].set_ylabel('Accuracy')
+    axs[1].set_title('Final Accuracy Plot (m=200, 5 Cycles, SGD+CLR)')
+    axs[1].legend()
+    plt.tight_layout()
+    plt.savefig("images/Assignment2/Bonus_Exp1_BestModel.png")
+    plt.close()
+
+    # 2: Dropout Over-regularization Test
+    print("\n=== EXPERIMENT 2: Dropout Test (keep_prob=0.8) ===")
+    net_2 = InitParameters(d=X_train_final_n.shape[0], m=200)
+    
+    # Parameters are the same as Exp 1, only enabling Dropout (keeping 80% of neurons)
+    trained_net_2, _, _, _, _, _, _ = MiniBatchGD(
+        X_train_final_n, Y_train_final, y_train_final, 
+        X_val_final_n, Y_val_final, y_val_final, 
+        GDparams_1, net_2, lam_1, 
+        augment_data=True, keep_prob=0.8, optimizer='sgd'
+    )
+    
+    P_test_2, _ = ApplyNetwork(X_test_n, trained_net_2, keep_prob=1.0)
+    test_acc_2 = ComputeAccuracy(P_test_2, y_test)
+    print(f"Dropout Model Test Accuracy: {test_acc_2 * 100:.2f}% (Expected drop to ~54.85%)")
+
+    # 3: Adam Optimizer Baseline Comparison
+    print("\n=== EXPERIMENT 3: Adam Optimizer Comparison ===")
+    net_3 = InitParameters(d=X_train_final_n.shape[0], m=200)
+    
+    # 20 epochs, lambda = 0.000032
+    GDparams_3 = {'n_batch': 100, 'eta': 5e-4, 'n_epochs': 20}
+    lam_3 = 0.000032
+    
+    trained_net_3, _, _, train_loss_3, val_loss_3, train_acc_3, val_acc_3 = MiniBatchGD(
+        X_train_final_n, Y_train_final, y_train_final, 
+        X_val_final_n, Y_val_final, y_val_final, 
+        GDparams_3, net_3, lam_3, 
         augment_data=True, keep_prob=1.0, optimizer='adam'
     )
     
-    # 测试集表现
-    P_test, _ = ApplyNetwork(X_test_n, trained_net_final)
-    final_test_acc = ComputeAccuracy(P_test, y_test)
+    P_test_3, _ = ApplyNetwork(X_test_n, trained_net_3, keep_prob=1.0)
+    test_acc_3 = ComputeAccuracy(P_test_3, y_test)
+    print(f"Adam Model Test Accuracy: {test_acc_3 * 100:.2f}% (Expected ~54.18%)")
     
-    # === 图表标题和保存的文件名更新为 Adam ===
-    os.makedirs("images/Assignment2", exist_ok=True)
-    epochs_range = range(1, n_epochs_final + 1)
     fig, axs = plt.subplots(1, 2, figsize=(12, 5))
-    
-    axs[0].plot(epochs_range, train_loss, label='Training loss', color='green')
-    axs[0].plot(epochs_range, val_loss, label='Validation loss', color='red')
+    axs[0].plot(epochs_range, train_loss_3, label='Training loss', color='green')
+    axs[0].plot(epochs_range, val_loss_3, label='Validation loss', color='red')
     axs[0].set_xlabel('Epochs')
     axs[0].set_ylabel('Loss')
     axs[0].set_title('Final Loss Plot (m=200, Adam)')
     axs[0].legend()
     
-    axs[1].plot(epochs_range, train_acc, label='Training accuracy', color='green')
-    axs[1].plot(epochs_range, val_acc, label='Validation accuracy', color='red')
+    axs[1].plot(epochs_range, train_acc_3, label='Training accuracy', color='green')
+    axs[1].plot(epochs_range, val_acc_3, label='Validation accuracy', color='red')
     axs[1].set_xlabel('Epochs')
     axs[1].set_ylabel('Accuracy')
     axs[1].set_title('Final Accuracy Plot (m=200, Adam)')
     axs[1].legend()
-    
     plt.tight_layout()
-    plt.savefig("images/Assignment2/Figure6_Final_Training_Adam.png")
+    plt.savefig("images/Assignment2/Bonus_Exp3_Adam.png")
     plt.close()
-    
+
     print("\n==========================================")
-    print("🎓 ADAM OPTIMIZER EXERCISE COMPLETED!")
-    print(f"Network Configuration: m=200, Augmentation=True, Optimizer=Adam")
-    print(f"🚀 Final Test Accuracy: {final_test_acc * 100:.2f}%")
-    print("Images saved as 'Figure6_Final_Training_Adam.png'.")
+    print("ALL EXPERIMENTS COMPLETED!")
     print("==========================================")
