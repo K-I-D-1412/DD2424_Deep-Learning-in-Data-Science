@@ -20,6 +20,11 @@ This repository contains a progressive series of image classifiers built **entir
 | Assignment 2 Baseline | Two-layer (m=50) | SGD + CLR | Cyclical LR, Coarse-to-Fine Search | 51.18% |
 | Assignment 2 Bonus (CLR) | Two-layer (m=200) | SGD + CLR | Dual Augmentation, Network Scaling | **56.51%** |
 | Assignment 2 Bonus (Adam) | Two-layer (m=200) | Adam | Adam Optimizer, Dual Augmentation | 54.18% |
+| Assignment 3 Initial ConvNet | Patchify ConvNet (f=4, nf=10, nh=50) | SGD + CLR | Efficient patch matrix convolution, hand-derived gradients | 56.21% |
+| Assignment 3 Best Short Run | Patchify ConvNet (f=8, nf=40, nh=50) | SGD + CLR | Filter-size comparison, cached MX representation | 58.71% |
+| Assignment 3 Best Long Run | Patchify ConvNet (f=4, nf=40, nh=50) | SGD + Increasing CLR | Wider convolution layer, increasing cycle lengths | 64.64% |
+| Assignment 3 Large ConvNet | Patchify ConvNet (f=4, nf=40, nh=300) | SGD + Increasing CLR | Large network, L2 regularization | **66.10%** |
+| Assignment 3 Large ConvNet + LS | Patchify ConvNet (f=4, nf=40, nh=300) | SGD + Increasing CLR | Label smoothing ε=0.1, reduced test loss | 66.02% |
 
 ---
 
@@ -33,7 +38,7 @@ This repository contains a progressive series of image classifiers built **entir
 | [`two_layer_image_classifier.py`](two_layer_image_classifier.py) | **Assignment 2 — Core.** Two-layer neural network (input → ReLU hidden → Softmax output). Introduces Cyclical Learning Rates (CLR), coarse-to-fine random search for λ on log-scale, and He initialization (`1/√d`). |
 | [`bonus_two_layer_image_classifier.py`](bonus_two_layer_image_classifier.py) | **Assignment 2 — Bonus.** Extended two-layer network with: network scaling (m=200), dual data augmentation (flipping + spatial translation ±3px), Inverted Dropout, and Adam optimizer support. Supports `optimizer='sgd'` and `optimizer='adam'` modes via a unified `MiniBatchGD` interface. |
 | [`torch_gradient_computations.py`](torch_gradient_computations.py) | **Utility.** Uses PyTorch's autograd to independently compute gradients for verification against hand-derived analytical gradients (max error ~10⁻⁸). |
-
+| [`assignment3_convnet.py`](assignment3_convnet.py) | **Assignment 3 — Patchify ConvNet.** Three-layer image classifier with an initial non-overlapping patch-based convolution layer. Implements slow convolution checks, efficient `MX @ Fs_flat` / `np.einsum` convolution, hand-derived forward/backward passes, L2 regularization, convolution bias, label smoothing, increasing cyclical learning rates, cached patch matrices, and experiment plotting utilities. |
 ---
 
 ## 🛠️ Part 1: Basic Framework & Baseline (Exercise 1)
@@ -198,6 +203,119 @@ While the Adam optimizer provided remarkably smooth curves and rapid initial con
 
 ---
 
+## 🧩 Part 6: Patchify Convolutional Network (Assignment 3)
+
+Assignment 3 extends the previous NumPy classifiers by replacing the raw flattened input layer with a lightweight patch-based convolution layer. The model is still implemented fully from scratch, including forward propagation, backpropagation, gradient checks, training loops, learning-rate schedules, and experiment management.
+
+### 1. Efficient Patch-Based Convolution
+
+The input CIFAR-10 image is first reshaped from a flattened vector into a `32 × 32 × 3` image. For a filter width `f`, each image is divided into non-overlapping patches. These patches are flattened into a matrix `MX`, where each row corresponds to one image patch.
+
+The convolution filters are also flattened into `Fs_flat`, so the convolution can be computed efficiently as a matrix multiplication. The final implementation uses:
+
+```python
+np.einsum("ijn,jl->iln", MX, Fs_flat, optimize=True)
+```
+
+This removes the explicit loop over images and gives an efficient batch convolution implementation.
+
+The implementation was verified against the provided `debug_info.npz` file. The slow convolution, patch matrix construction, flattened filters, matrix multiplication convolution, `einsum` convolution, forward pass, and backward pass all matched the reference outputs with maximum absolute difference `0.000000000000e+00`.
+
+### 2. Training Infrastructure
+
+The final `assignment3_convnet.py` script includes:
+
+* cached patch matrices under `assignment3_cache/`;
+* experiment summaries and trained parameters under `assignment3_outputs/`;
+* report figures under `assignment3_report_assets/`;
+* standard cyclical learning rates;
+* increasing-cycle-length learning rates;
+* L2 regularization on `Fs_flat`, `W1`, and `W2`;
+* convolution bias `b0`;
+* optional label smoothing;
+* command-line experiment actions via `--action`.
+
+### 3. Short Training Runs
+
+Four architectures were trained to compare different filter widths while keeping the flattened convolution output dimension approximately comparable.
+
+| Architecture | f | nf | nh | Training Time | Validation Accuracy | Test Accuracy |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Architecture 1 | 2 | 3 | 50 | 31.54s | 49.50% | 51.16% |
+| Architecture 2 | 4 | 10 | 50 | 25.56s | 57.00% | 56.21% |
+| Architecture 3 | 8 | 40 | 50 | 25.49s | 59.70% | 58.71% |
+| Architecture 4 | 16 | 160 | 50 | 29.43s | 57.40% | 56.56% |
+
+Architecture 3 achieved the best short-run performance, suggesting that an intermediate filter size can provide a good balance between local feature extraction and representation capacity.
+
+**Figure 14: Assignment 3 Short-Run Test Accuracy**
+
+![Assignment 3 Short-Run Test Accuracy](assignment3_report_assets/ex3_short_runs_test_accuracy.png)
+
+**Figure 15: Assignment 3 Short-Run Training Time**
+
+![Assignment 3 Short-Run Training Time](assignment3_report_assets/ex3_short_runs_training_time.png)
+
+### 4. Longer Training with Increasing Cycle Lengths
+
+The cyclical learning rate schedule was extended so that the half-cycle length doubles after each cycle:
+
+* Cycle 1: `step_size = 800`
+* Cycle 2: `step_size = 1600`
+* Cycle 3: `step_size = 3200`
+
+This gives `11200` total update steps for three cycles.
+
+| Model | f | nf | nh | Training Time | Validation Accuracy | Test Accuracy |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Long Run 1 | 4 | 10 | 50 | 63.55s | 57.10% | 58.13% |
+| Long Run 2 | 8 | 40 | 50 | 53.36s | 62.70% | 61.08% |
+| Long Run 3 | 4 | 40 | 50 | 123.69s | 64.40% | 64.64% |
+
+The strongest long-run model was `f=4, nf=40, nh=50`, reaching **64.64%** test accuracy. This suggests that the improvement of the wider models was strongly related to the increased number of convolution filters, not only the larger filter width.
+
+**Figure 16: Long Training Loss Curve (f=4, nf=10)**
+
+![Long Training Loss Curve f4 nf10](assignment3_report_assets/ex3_long_loss_f4_nf10.png)
+
+**Figure 17: Long Training Loss Curve (f=8, nf=40)**
+
+![Long Training Loss Curve f8 nf40](assignment3_report_assets/ex3_long_loss_f8_nf40.png)
+
+**Figure 18: Long Training Loss Curve (f=4, nf=40)**
+
+![Long Training Loss Curve f4 nf40](assignment3_report_assets/ex3_long_loss_f4_nf40.png)
+
+### 5. Larger Network and Label Smoothing
+
+A larger network was trained with:
+
+* `f = 4`
+* `nf = 40`
+* `nh = 300`
+* `lambda = 0.0025`
+* `n_cycles = 4`
+* `step_size_1 = 800`
+
+Two versions were compared: one without label smoothing and one with label smoothing using `epsilon = 0.1`.
+
+| Setting | Training Time | Train Subset Accuracy | Validation Accuracy | Test Accuracy | Test Loss | Test Cost |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| No Label Smoothing | 392.46s | 99.30% | 67.80% | **66.10%** | 1.0504 | 1.5872 |
+| Label Smoothing ε=0.1 | 502.56s | 97.78% | 68.20% | 66.02% | 1.0302 | 1.4123 |
+
+Label smoothing did not significantly improve test accuracy in this run, but it reduced the test loss from `1.0504` to `1.0302` and lowered the test cost from `1.5872` to `1.4123`. This suggests that label smoothing mainly reduced overconfident predictions and improved the loss behavior rather than changing the final classification accuracy.
+
+**Figure 19: Exercise 4 Loss Curves without Label Smoothing**
+
+![Exercise 4 Loss Curves without Label Smoothing](assignment3_report_assets/ex4_loss_no_label_smoothing.png)
+
+**Figure 20: Exercise 4 Loss Curves with Label Smoothing**
+
+![Exercise 4 Loss Curves with Label Smoothing](assignment3_report_assets/ex4_loss_label_smoothing.png)
+
+---
+
 ## 🔧 Setup & Reproduction
 
 ### Prerequisites
@@ -218,11 +336,16 @@ DD2424_Assignment1/
 ├── images/
 │   ├── Assignment2/
 │   └── ...
+├── assignment3_cache/                 # Generated MX cache, not tracked by Git
+├── assignment3_outputs/               # Experiment summaries and generated parameters
+├── assignment3_report_assets/         # Assignment 3 figures used in README/report
 ├── image_classifier.py
 ├── bonus_image_classifier.py
 ├── BCE_image_classifier.py
 ├── two_layer_image_classifier.py
 ├── bonus_two_layer_image_classifier.py
+├── assignment3_convnet.py
+├── debug_info.npz
 ├── torch_gradient_computations.py
 └── README.md
 ```
@@ -243,4 +366,16 @@ python two_layer_image_classifier.py
 
 # Assignment 2 — Bonus (Adam / Augmentation / Scaling)
 python bonus_two_layer_image_classifier.py
+
+# Assignment 3 — Debug checks
+python assignment3_convnet.py --action debug
+
+# Assignment 3 — Plot existing experiment figures
+python assignment3_convnet.py --action plot-short
+python assignment3_convnet.py --action plot-long
+python assignment3_convnet.py --action plot-ex4
+
+# Assignment 3 — Exercise 4 experiments
+python assignment3_convnet.py --action ex4-no-ls
+python assignment3_convnet.py --action ex4-ls
 ```

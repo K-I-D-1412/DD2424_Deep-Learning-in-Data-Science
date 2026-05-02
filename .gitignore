@@ -1,3 +1,7 @@
 Datasets/
 __pycache__/
 .DS_Store
+# Assignment 3 generated/cache files
+assignment3_cache/
+assignment3_outputs/*_params.npz
+__pycache__/
