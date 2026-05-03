@@ -415,9 +415,10 @@ PyTorch CPU was faster for small and medium filter widths, while the NumPy imple
 
 The best bonus model was the 5-cycle random horizontal flip model, which achieved **69.80%** test accuracy. This is an absolute improvement of **3.70 percentage points** over the large non-augmented ConvNet from Exercise 4.
 
+The experiments show that data augmentation was more effective than label smoothing or further L2 tuning for this patchify ConvNet. The main drawback is computational cost, since the augmented patch matrix must be rebuilt dynamically for every mini-batch.
+
 The bonus experiments show that data augmentation gave the largest accuracy improvement, while the speed comparison showed that the custom NumPy implementation can be competitive with PyTorch CPU for large non-overlapping filters.
 
-The experiments show that data augmentation was more effective than label smoothing or further L2 tuning for this patchify ConvNet. The main drawback is computational cost, since the augmented patch matrix must be rebuilt dynamically for every mini-batch.
 ---
 
 ## 🔧 Setup & Reproduction
