@@ -25,6 +25,8 @@ This repository contains a progressive series of image classifiers built **entir
 | Assignment 3 Best Long Run | Patchify ConvNet (f=4, nf=40, nh=50) | SGD + Increasing CLR | Wider convolution layer, increasing cycle lengths | 64.64% |
 | Assignment 3 Large ConvNet | Patchify ConvNet (f=4, nf=40, nh=300) | SGD + Increasing CLR | Large network, L2 regularization | **66.10%** |
 | Assignment 3 Large ConvNet + LS | Patchify ConvNet (f=4, nf=40, nh=300) | SGD + Increasing CLR | Label smoothing ε=0.1, reduced test loss | 66.02% |
+| Assignment 3 Bonus (Flip) | Patchify ConvNet (f=4, nf=40, nh=300) | SGD + Increasing CLR | Random horizontal flip augmentation | 69.50% |
+| Assignment 3 Bonus (Flip, 5 Cycles) | Patchify ConvNet (f=4, nf=40, nh=300) | SGD + Increasing CLR | Random horizontal flip, longer training | **69.80%** |
 
 ---
 
@@ -39,6 +41,7 @@ This repository contains a progressive series of image classifiers built **entir
 | [`bonus_two_layer_image_classifier.py`](bonus_two_layer_image_classifier.py) | **Assignment 2 — Bonus.** Extended two-layer network with: network scaling (m=200), dual data augmentation (flipping + spatial translation ±3px), Inverted Dropout, and Adam optimizer support. Supports `optimizer='sgd'` and `optimizer='adam'` modes via a unified `MiniBatchGD` interface. |
 | [`torch_gradient_computations.py`](torch_gradient_computations.py) | **Utility.** Uses PyTorch's autograd to independently compute gradients for verification against hand-derived analytical gradients (max error ~10⁻⁸). |
 | [`assignment3_convnet.py`](assignment3_convnet.py) | **Assignment 3 — Patchify ConvNet.** Three-layer image classifier with an initial non-overlapping patch-based convolution layer. Implements slow convolution checks, efficient `MX @ Fs_flat` / `np.einsum` convolution, hand-derived forward/backward passes, L2 regularization, convolution bias, label smoothing, increasing cyclical learning rates, cached patch matrices, and experiment plotting utilities. |
+| [`assignment3_bonus_convnet.py`](assignment3_bonus_convnet.py) | **Assignment 3 — Bonus.** Separate bonus implementation based on the verified Assignment 3 ConvNet. Adds dynamic random horizontal flip augmentation for training mini-batches, rebuilds `MX_batch` on the fly, and includes bonus experiments for label smoothing, L2 regularization search, longer training, and maximum learning-rate comparison. |
 ---
 
 ## 🛠️ Part 1: Basic Framework & Baseline (Exercise 1)
@@ -316,6 +319,86 @@ Label smoothing did not significantly improve test accuracy in this run, but it 
 
 ---
 
+## 🏆 Part 7: Bonus Experiments — Data Augmentation for Patchify ConvNet
+
+The Assignment 3 bonus experiments were implemented in a separate file, `assignment3_bonus_convnet.py`, to keep the main verified implementation independent from the bonus modifications.
+
+The main idea was to test whether data augmentation could further improve the large patchify ConvNet. Since the best non-augmented large model still showed a large gap between training and test accuracy, random horizontal flipping was added as a dynamic training-time augmentation.
+
+### 1. Dynamic Random Horizontal Flip
+
+In the main Assignment 3 experiments, the training patch matrix `MX_train` was precomputed and cached. However, random horizontal flipping changes the image content at every mini-batch, so the augmented training batches cannot reuse a fixed cached `MX_train`.
+
+Therefore, the bonus training loop uses the following dynamic pipeline for every mini-batch:
+
+```text
+X_batch -> random horizontal flip -> image tensor -> MX_batch -> forward/backward pass
+```
+
+Validation and test sets are not augmented, and their cached `MX` matrices are still used for deterministic evaluation.
+
+### 2. Bonus Experiment Results
+
+The large ConvNet architecture was kept the same as in Exercise 4:
+
+* `f = 4`
+* `nf = 40`
+* `nh = 300`
+* `lambda = 0.0025`
+* `step_size_1 = 800`
+* `flip_probability = 0.5`
+
+Several bonus variants were tested.
+
+| Experiment | Train Subset Accuracy | Validation Accuracy | Test Accuracy | Test Loss |
+| :--- | ---: | ---: | ---: | ---: |
+| Large ConvNet without augmentation | 99.30% | 67.80% | 66.10% | 1.0504 |
+| Large ConvNet with label smoothing | 97.78% | 68.20% | 66.02% | 1.0302 |
+| Random horizontal flip, 4 cycles | 88.86% | 70.10% | 69.50% | 0.8903 |
+| Random horizontal flip + label smoothing | 84.26% | 70.60% | 68.78% | 0.9630 |
+| Random horizontal flip, 5 cycles | 93.32% | 70.60% | **69.80%** | **0.8850** |
+
+Random horizontal flipping gave the largest improvement. It increased the test accuracy from `66.10%` to `69.50%` with 4 cycles. Extending the flip-augmented training to 5 cycles further improved the test accuracy to `69.80%`.
+
+### 3. Regularization and Learning Rate Search
+
+Additional experiments were run to investigate whether the flip-augmented model could be improved further. Lower L2 regularization values caused stronger overfitting, while a larger value also reduced accuracy. Combining flip augmentation with label smoothing also did not improve the final test accuracy.
+
+Different maximum learning rates were also tested for the 5-cycle flip setup.
+
+| Experiment | eta_max | Validation Accuracy | Test Accuracy | Test Loss |
+| :--- | ---: | ---: | ---: | ---: |
+| Flip, 5 cycles | 0.100 | 70.60% | **69.80%** | **0.8850** |
+| Flip, 5 cycles | 0.075 | **71.40%** | 69.72% | 0.8992 |
+| Flip, 5 cycles | 0.050 | 68.00% | 68.94% | 0.9124 |
+
+Although `eta_max = 0.075` achieved the highest validation accuracy, it did not achieve the best test accuracy. The best final test accuracy was obtained with `eta_max = 0.1`.
+
+### 4. Bonus Visualizations
+
+**Figure 21: Best Bonus Flip-Augmentation Loss Curves**
+
+![Best Bonus Flip-Augmentation Loss Curves](assignment3_report_assets/bonus_flip_loss_curves.png)
+
+**Figure 22: Compact Bonus Accuracy Comparison**
+
+![Compact Bonus Accuracy Comparison](assignment3_report_assets/bonus_comparison_accuracy.png)
+
+**Figure 23: Final Bonus Test Accuracy Comparison**
+
+![Final Bonus Test Accuracy Comparison](assignment3_report_assets/bonus_final_accuracy_comparison.png)
+
+**Figure 24: Final Bonus Test Loss Comparison**
+
+![Final Bonus Test Loss Comparison](assignment3_report_assets/bonus_final_loss_comparison.png)
+
+### 5. Bonus Takeaway
+
+The best bonus model was the 5-cycle random horizontal flip model, which achieved **69.80%** test accuracy. This is an absolute improvement of **3.70 percentage points** over the large non-augmented ConvNet from Exercise 4.
+
+The experiments show that data augmentation was more effective than label smoothing or further L2 tuning for this patchify ConvNet. The main drawback is computational cost, since the augmented patch matrix must be rebuilt dynamically for every mini-batch.
+---
+
 ## 🔧 Setup & Reproduction
 
 ### Prerequisites
@@ -345,6 +428,7 @@ DD2424_Assignment1/
 ├── two_layer_image_classifier.py
 ├── bonus_two_layer_image_classifier.py
 ├── assignment3_convnet.py
+├── assignment3_bonus_convnet.py
 ├── debug_info.npz
 ├── torch_gradient_computations.py
 └── README.md
@@ -378,4 +462,17 @@ python assignment3_convnet.py --action plot-ex4
 # Assignment 3 — Exercise 4 experiments
 python assignment3_convnet.py --action ex4-no-ls
 python assignment3_convnet.py --action ex4-ls
+
+# Assignment 3 — Bonus debug check
+python assignment3_bonus_convnet.py --action debug
+
+# Assignment 3 — Bonus sanity check for random horizontal flip
+python assignment3_bonus_convnet.py --action bonus-sanity
+
+# Assignment 3 — Bonus experiments
+python assignment3_bonus_convnet.py --action bonus-flip
+python assignment3_bonus_convnet.py --action bonus-flip-5cycles
+
+# Assignment 3 — Bonus plots
+python assignment3_bonus_convnet.py --action plot-bonus
 ```
