@@ -5,6 +5,8 @@ import pickle
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
+import torch.nn.functional as F
 
 DEBUG_FILE = "debug_info.npz"
 OUTPUT_DIR = "assignment3_outputs"
@@ -704,6 +706,69 @@ def plot_bonus_results():
 
     return loss_path, acc_path, final_acc_path, final_loss_path
       
+def plot_speed_comparison_results(summary=None):
+    """
+    Plot NumPy vs PyTorch CPU speed comparison.
+    """
+    if summary is None:
+        summary_path = os.path.join(OUTPUT_DIR, "bonus_speed_comparison_summary.json")
+        with open(summary_path, "r") as f_json:
+            summary = json.load(f_json)
+
+    results = summary["results"]
+
+    labels = [f"f={r['f']}\nnf={r['nf']}" for r in results]
+    numpy_times = [r["numpy_time"] for r in results]
+    torch_times = [r["torch_cpu_time"] for r in results]
+    ratios = [r["torch_over_numpy_ratio"] for r in results]
+
+    x = np.arange(len(labels))
+    width = 0.35
+
+    os.makedirs(REPORT_ASSET_DIR, exist_ok=True)
+
+    plt.figure(figsize=(9, 5))
+    plt.bar(x - width / 2, numpy_times, width, label="NumPy implementation")
+    plt.bar(x + width / 2, torch_times, width, label="PyTorch CPU conv2d")
+
+    plt.xticks(x, labels)
+    plt.ylabel("Training time for 200 updates (seconds)")
+    plt.xlabel("Architecture")
+    plt.title("NumPy vs PyTorch CPU Training Speed")
+    plt.legend()
+
+    for idx, value in enumerate(numpy_times):
+        plt.text(idx - width / 2, value + 0.02, f"{value:.2f}s", ha="center", va="bottom", fontsize=8)
+
+    for idx, value in enumerate(torch_times):
+        plt.text(idx + width / 2, value + 0.02, f"{value:.2f}s", ha="center", va="bottom", fontsize=8)
+
+    plt.tight_layout()
+
+    time_path = os.path.join(REPORT_ASSET_DIR, "bonus_speed_comparison_times.png")
+    plt.savefig(time_path, dpi=200)
+    plt.close()
+
+    plt.figure(figsize=(8, 5))
+    plt.bar(labels, ratios)
+    plt.ylabel("PyTorch CPU time / NumPy time")
+    plt.xlabel("Architecture")
+    plt.title("Relative Speed: PyTorch CPU vs NumPy")
+
+    for idx, value in enumerate(ratios):
+        plt.text(idx, value + 0.02, f"{value:.2f}x", ha="center", va="bottom")
+
+    plt.tight_layout()
+
+    ratio_path = os.path.join(REPORT_ASSET_DIR, "bonus_speed_comparison_ratio.png")
+    plt.savefig(ratio_path, dpi=200)
+    plt.close()
+
+    print(f"  Saved speed timing plot to {time_path}")
+    print(f"  Saved speed ratio plot to {ratio_path}")
+
+    return time_path, ratio_path
+
 def compute_cyclic_learning_rate(t, step_size, eta_min, eta_max):
     # Compute cyclical learning rate for update step t.
     cycle_position = t % (2 * step_size)
@@ -875,6 +940,136 @@ def flat_cifar_to_images(X, img_size=32, channels=3):
     )
 
     return X_ims
+
+def flat_cifar_to_torch_images(X_batch):
+    """
+    Convert flattened CIFAR-10 data with shape (3072, n) to a PyTorch tensor
+    with shape (n, 3, 32, 32).
+
+    This matches the format expected by torch.nn.functional.conv2d.
+    """
+    X_ims = flat_cifar_to_images(X_batch)  # (32, 32, 3, n)
+    X_torch = np.transpose(X_ims, (3, 2, 0, 1))  # (n, 3, 32, 32)
+    return torch.tensor(X_torch, dtype=torch.float32)
+
+def initialize_torch_parameters(f, nf, nh, K=10, img_size=32, channels=3, seed=42):
+    """
+    Initialize PyTorch parameters for the same patchify ConvNet architecture.
+
+    The convolution uses stride=f, so it matches the non-overlapping patchify
+    convolution used in the NumPy implementation.
+    """
+    torch.manual_seed(seed)
+
+    patch_dim = f * f * channels
+    patches_per_side = img_size // f
+    n_p = patches_per_side * patches_per_side
+    d0 = n_p * nf
+
+    params = {}
+
+    # conv2d weight shape: (out_channels, in_channels, kernel_height, kernel_width)
+    params["conv_weight"] = torch.randn(nf, channels, f, f) * np.sqrt(2.0 / patch_dim)
+    params["conv_bias"] = torch.zeros(nf)
+
+    params["W1"] = torch.randn(nh, d0) * np.sqrt(2.0 / d0)
+    params["b1"] = torch.zeros(nh)
+
+    params["W2"] = torch.randn(K, nh) * np.sqrt(2.0 / nh)
+    params["b2"] = torch.zeros(K)
+
+    for key in params:
+        params[key] = params[key].float()
+        params[key].requires_grad_(True)
+
+    return params
+
+def evaluate_torch_network(X_torch, params, f):
+    # Forward pass for the PyTorch CPU version of the patchify ConvNet.
+    conv = F.conv2d(
+        X_torch,
+        params["conv_weight"],
+        bias=params["conv_bias"],
+        stride=f,
+    )
+
+    conv = torch.relu(conv)
+
+    # (n, nf, h, w) -> (n, h, w, nf) -> (n, h*w*nf)
+    conv_flat = conv.permute(0, 2, 3, 1).contiguous().view(X_torch.shape[0], -1)
+
+    hidden = torch.relu(conv_flat @ params["W1"].T + params["b1"])
+    logits = hidden @ params["W2"].T + params["b2"]
+
+    return logits
+
+def time_torch_training_cpu(
+    X_train,
+    y_train,
+    f,
+    nf,
+    nh,
+    lam=0.003,
+    n_batch=100,
+    max_updates=200,
+    eta=1e-2,
+    seed=42,
+):
+    """
+    Time PyTorch CPU training using torch.nn.functional.conv2d and autograd.
+
+    This is a short timing benchmark, not a full training run.
+    """
+    torch.set_num_threads(1)
+    torch.manual_seed(seed)
+
+    rng = np.random.default_rng(seed)
+    n_train = X_train.shape[1]
+
+    params = initialize_torch_parameters(f=f, nf=nf, nh=nh, seed=seed)
+
+    start_time = time.time()
+    update_step = 0
+
+    while update_step < max_updates:
+        permutation = rng.permutation(n_train)
+
+        for batch_start in range(0, n_train, n_batch):
+            if update_step >= max_updates:
+                break
+
+            batch_indices = permutation[batch_start:batch_start + n_batch]
+
+            X_batch = X_train[:, batch_indices]
+            y_batch = y_train[batch_indices]
+
+            X_torch = flat_cifar_to_torch_images(X_batch)
+            y_torch = torch.tensor(y_batch, dtype=torch.long)
+
+            logits = evaluate_torch_network(X_torch, params, f=f)
+
+            loss = F.cross_entropy(logits, y_torch)
+
+            reg = lam * (
+                torch.sum(params["conv_weight"] ** 2)
+                + torch.sum(params["W1"] ** 2)
+                + torch.sum(params["W2"] ** 2)
+            )
+
+            cost = loss + reg
+
+            cost.backward()
+
+            with torch.no_grad():
+                for key in params:
+                    params[key] -= eta * params[key].grad
+                    params[key].grad.zero_()
+
+            update_step += 1
+
+    elapsed_time = time.time() - start_time
+
+    return elapsed_time
 
 def preprocess_data(X_train, X_val, X_test):
     # Normalize train, validation, and test data using training-set statistics.
@@ -1155,6 +1350,159 @@ def train_model(
 
     return params, history, training_time
 
+def time_numpy_training(
+    X_train,
+    Y_train,
+    y_train,
+    X_val,
+    Y_val,
+    y_val,
+    f,
+    nf,
+    nh,
+    lam=0.003,
+    n_batch=100,
+    max_updates=200,
+    eta_min=1e-2,
+    eta_max=1e-2,
+    seed=42,
+):
+    """
+    Time NumPy training using the assignment implementation.
+
+    This benchmark precomputes MX_train once, then times only the training loop.
+    """
+    MX_train = precompute_or_load_MX(X_train, f=f, split_name=f"speed_train_f{f}")
+    MX_val = precompute_or_load_MX(X_val, f=f, split_name=f"speed_val_f{f}")
+
+    params = initialize_parameters(f=f, nf=nf, nh=nh, seed=seed, dtype=np.float32)
+
+    start_time = time.time()
+
+    params, history, training_time = train_model(
+        MX_train=MX_train,
+        Y_train=Y_train,
+        y_train=y_train,
+        MX_val=MX_val,
+        Y_val=Y_val,
+        y_val=y_val,
+        params=params,
+        lam=lam,
+        n_batch=n_batch,
+        eta_min=eta_min,
+        eta_max=eta_max,
+        step_size=10**9,
+        n_cycles=1,
+        eval_every=max_updates,
+        train_eval_size=1000,
+        max_updates=max_updates,
+        seed=seed,
+    )
+
+    elapsed_time = time.time() - start_time
+
+    return elapsed_time
+
+def run_speed_comparison_experiment(data_dir="./Datasets/cifar-10-batches-py", val_size=1000):
+    """
+    Compare training speed between the NumPy implementation and PyTorch CPU conv2d.
+
+    The benchmark uses short training runs with the same architecture settings.
+    """
+    data = get_preprocessed_cifar10(data_dir=data_dir, val_size=val_size)
+
+    architectures = [
+        {"name": "f2_nf3", "f": 2, "nf": 3, "nh": 50},
+        {"name": "f4_nf10", "f": 4, "nf": 10, "nh": 50},
+        {"name": "f8_nf40", "f": 8, "nf": 40, "nh": 50},
+        {"name": "f16_nf160", "f": 16, "nf": 160, "nh": 50},
+    ]
+
+    max_updates = 200
+    n_batch = 100
+    lam = 0.003
+    seed = 42
+
+    results = []
+
+    print("\n[Bonus] NumPy vs PyTorch CPU speed comparison")
+    print(f"  max_updates={max_updates}, n_batch={n_batch}")
+
+    for arch in architectures:
+        f = arch["f"]
+        nf = arch["nf"]
+        nh = arch["nh"]
+
+        print(f"\n  Architecture: f={f}, nf={nf}, nh={nh}")
+
+        numpy_time = time_numpy_training(
+            X_train=data["X_train"],
+            Y_train=data["Y_train"],
+            y_train=data["y_train"],
+            X_val=data["X_val"],
+            Y_val=data["Y_val"],
+            y_val=data["y_val"],
+            f=f,
+            nf=nf,
+            nh=nh,
+            lam=lam,
+            n_batch=n_batch,
+            max_updates=max_updates,
+            seed=seed,
+        )
+
+        torch_time = time_torch_training_cpu(
+            X_train=data["X_train"],
+            y_train=data["y_train"],
+            f=f,
+            nf=nf,
+            nh=nh,
+            lam=lam,
+            n_batch=n_batch,
+            max_updates=max_updates,
+            eta=1e-2,
+            seed=seed,
+        )
+
+        speed_ratio = torch_time / numpy_time
+
+        result = {
+            "name": arch["name"],
+            "f": f,
+            "nf": nf,
+            "nh": nh,
+            "max_updates": max_updates,
+            "n_batch": n_batch,
+            "numpy_time": numpy_time,
+            "torch_cpu_time": torch_time,
+            "torch_over_numpy_ratio": speed_ratio,
+        }
+
+        results.append(result)
+
+        print(f"    NumPy time: {numpy_time:.4f} s")
+        print(f"    PyTorch CPU time: {torch_time:.4f} s")
+        print(f"    PyTorch / NumPy ratio: {speed_ratio:.4f}")
+
+    summary = {
+        "benchmark": "NumPy patchify ConvNet vs PyTorch CPU conv2d",
+        "max_updates": max_updates,
+        "n_batch": n_batch,
+        "results": results,
+    }
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    summary_path = os.path.join(OUTPUT_DIR, "bonus_speed_comparison_summary.json")
+
+    with open(summary_path, "w") as f_json:
+        json.dump(summary, f_json, indent=2)
+
+    print(f"\n  Saved speed comparison summary to {summary_path}")
+
+    plot_speed_comparison_results(summary)
+
+    return summary
+    
 def run_training_sanity_check(data_dir="./Datasets/cifar-10-batches-py", val_size=1000):
     # Run a short training sanity check for the initial Exercise 3 architecture.
     (
@@ -2694,6 +3042,8 @@ def main():
             "bonus-flip-5cycles",
             "bonus-flip-5cycles-etamax005",
             "bonus-flip-5cycles-etamax0075",
+            "speed-compare",
+            "plot-speed",
         ],
         help="Which task to run.",
     )
@@ -2759,6 +3109,13 @@ def main():
             eta_max=7.5e-2,
             result_name="bonus_flip_f4_nf40_nh300_5cycles_etamax0075",
         )
+    elif args.action == "speed-compare":
+        run_speed_comparison_experiment(
+            data_dir="./Datasets/cifar-10-batches-py",
+            val_size=1000,
+        )
+    elif args.action == "plot-speed":
+        plot_speed_comparison_results()
         
 if __name__ == "__main__":
     main()

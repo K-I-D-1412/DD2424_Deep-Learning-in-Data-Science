@@ -1,0 +1,51 @@
+{
+  "benchmark": "NumPy patchify ConvNet vs PyTorch CPU conv2d",
+  "max_updates": 200,
+  "n_batch": 100,
+  "results": [
+    {
+      "name": "f2_nf3",
+      "f": 2,
+      "nf": 3,
+      "nh": 50,
+      "max_updates": 200,
+      "n_batch": 100,
+      "numpy_time": 2.2675070762634277,
+      "torch_cpu_time": 0.5420007705688477,
+      "torch_over_numpy_ratio": 0.23902936235242014
+    },
+    {
+      "name": "f4_nf10",
+      "f": 4,
+      "nf": 10,
+      "nh": 50,
+      "max_updates": 200,
+      "n_batch": 100,
+      "numpy_time": 1.0625197887420654,
+      "torch_cpu_time": 0.4651799201965332,
+      "torch_over_numpy_ratio": 0.43780824143263
+    },
+    {
+      "name": "f8_nf40",
+      "f": 8,
+      "nf": 40,
+      "nh": 50,
+      "max_updates": 200,
+      "n_batch": 100,
+      "numpy_time": 1.1008479595184326,
+      "torch_cpu_time": 0.6973199844360352,
+      "torch_over_numpy_ratio": 0.6334389580383822
+    },
+    {
+      "name": "f16_nf160",
+      "f": 16,
+      "nf": 160,
+      "nh": 50,
+      "max_updates": 200,
+      "n_batch": 100,
+      "numpy_time": 1.389983892440796,
+      "torch_cpu_time": 3.151103973388672,
+      "torch_over_numpy_ratio": 2.2670075462927626
+    }
+  ]
+}

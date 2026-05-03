@@ -392,9 +392,30 @@ Although `eta_max = 0.075` achieved the highest validation accuracy, it did not 
 
 ![Final Bonus Test Loss Comparison](assignment3_report_assets/bonus_final_loss_comparison.png)
 
-### 5. Bonus Takeaway
+
+
+### 5. Speed Comparison with PyTorch CPU Conv2d
+
+I also compared the training speed of the NumPy patchify ConvNet with a PyTorch CPU implementation using `torch.nn.functional.conv2d` and autograd. Each architecture was trained for 200 update steps.
+
+| f | nf | NumPy Time | PyTorch CPU Time | PyTorch / NumPy |
+|---:|---:|---:|---:|---:|
+| 2 | 3 | 2.27s | 0.54s | 0.24× |
+| 4 | 10 | 1.06s | 0.47s | 0.44× |
+| 8 | 40 | 1.10s | 0.70s | 0.63× |
+| 16 | 160 | 1.39s | 3.15s | 2.27× |
+
+PyTorch CPU was faster for small and medium filter widths, while the NumPy implementation was faster for the largest filter width. This suggests that PyTorch's general convolution implementation is efficient for typical convolution sizes, but the custom NumPy patch-matrix implementation can be competitive for this assignment's special non-overlapping large-filter case.
+
+![NumPy vs PyTorch CPU Training Speed](assignment3_report_assets/bonus_speed_comparison_times.png)
+
+![Relative Speed PyTorch CPU vs NumPy](assignment3_report_assets/bonus_speed_comparison_ratio.png)
+
+### 6. Bonus Takeaway
 
 The best bonus model was the 5-cycle random horizontal flip model, which achieved **69.80%** test accuracy. This is an absolute improvement of **3.70 percentage points** over the large non-augmented ConvNet from Exercise 4.
+
+The bonus experiments show that data augmentation gave the largest accuracy improvement, while the speed comparison showed that the custom NumPy implementation can be competitive with PyTorch CPU for large non-overlapping filters.
 
 The experiments show that data augmentation was more effective than label smoothing or further L2 tuning for this patchify ConvNet. The main drawback is computational cost, since the augmented patch matrix must be rebuilt dynamically for every mini-batch.
 ---
